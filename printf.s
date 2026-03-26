@@ -1,7 +1,9 @@
 global my_printf
+extern printf
 
 %define printf_reg_ptr rbp + rbx * 8 + 24
- 
+%define BUFFER_SIZE (256)
+
 section .text
 my_printf:
 	pop r10
@@ -14,21 +16,26 @@ my_printf:
 	push rdi
 
 	push r10
+
 	call my_printf_internal
 
 	pop r10
 
-	cmp rax, 6
-	jge .glob_cleanup
-	lea rsp, [rsp + 6 * 8]
+	pop rdi
+	pop rsi
+	pop rdx
+	pop rcx
+	pop r8
+	pop r9
+	xor rax, rax
 
-	jmp .finish_cleanup
-.glob_cleanup:
-	lea rsp, [rsp + rax * 8]
+	; ret
 
-.finish_cleanup:
+	; push r10 ; ret to caller
+	mov [rel main_ret], r10
+	call printf WRT ..plt
+	mov r10, [rel main_ret]
 	push r10
-
 	ret
 
 ;--------------------------------------------
@@ -54,44 +61,31 @@ my_printf_internal:
 	mov rsi, [printf_reg_ptr]
 	inc rbx
 
-.fmt_loop:
-	lea rdi, [rsi - 1]
-.gather_buffer:
-	inc rdi
-	mov al, byte [rdi]
+.continue_fmt_print:
+	mov al, byte [rsi]
 
 	test al, al
-	jz .write_buffer
+	jz .stop_fmt
 
 	cmp al, '%'
-	jne .gather_buffer
+	je .parse_fmt
 
-.write_buffer:
-	cmp rdi, rsi
-	je .no_write
-
-	push rdi
-	
-	sub rdi, rsi
-
-	; write (fd, *buf, count)
-	mov rax, 1h
-	mov rdx, rdi
-	mov rdi, 1
-	syscall
-
+	push rsi
+	call printChar
 	pop rsi
+	inc rsi
 
-.no_write:
-	mov al, byte [rsi]
-	test al, al
-	jz .exit
+	jmp .continue_fmt_print
 
+.parse_fmt:
 	; skip %
 	inc rsi
 	call parse_fmt_internal
 
-	jmp .fmt_loop
+	jmp .continue_fmt_print
+
+.stop_fmt:
+	call forcePrintBuffer
 
 .exit:
 	mov rax, rbx
@@ -109,48 +103,39 @@ my_printf_internal:
 ; Returns parsing status in RAX: 0 on success, non-zero otherwise
 ; Increments RSI and RBX according to parsed format
 ;--------------------------------------------
-parse_fmt_internal:	
+parse_fmt_internal:
+	xor rax, rax
 	mov al, byte [rsi]
-
-
-switch:
+	
 	cmp al, '%'
 	je .percent_fmt
-	cmp al, 'c'
-	je .char_fmt
-	cmp al, 's'
-	je .string_fmt
-	cmp al, 'x'
-	je .hex_fmt
-	cmp al, 'o'
-	je .octal_fmt
-	cmp al, 'b'
-	je .binary_fmt
-	cmp al, 'd'
-	je .decimal_fmt
-	jmp .unknown_code
+
+	cmp al, 'z'
+	jg .unknown_code
+
+	cmp al, 'a'
+	jl .unknown_code
+
+	; jump table
+	lea rdi, [rel fmt_jump_table]
+	jmp [rdi + (rax - 'a') * 8]
 
 .percent_fmt:
-	; write (fd, *buf, count)
-	mov rax, 1h
-	mov rdi, 1
-	; rsi is rsi
-	mov rdx, 1
-	syscall
+	push rsi
+
+	mov al, '%'
+	call printChar
+
+	pop rsi
 	inc rsi
 
 	jmp .exit_success
 
 .char_fmt:
 	push rsi
-
-	; write (fd, *buf, count)
-	mov rax, 1h
-	mov rdi, 1
-	; in little-endian, points to lowest byte
-	lea rsi, [printf_reg_ptr]
-	mov rdx, 1
-	syscall
+	
+	mov al, byte [printf_reg_ptr]
+	call printChar
 
 	pop rsi
 
@@ -164,25 +149,23 @@ switch:
 
 	xor rdi, rdi
 	mov rsi, [printf_reg_ptr]
-	mov rdi, rsi
+
+	push r10
+	mov r10, rsi
 
 .roll_string:
-	mov al, byte [rdi]
+	mov al, byte [r10]
+
 	test al, al
 	jz .string_end
-	inc rdi
+
+	call printChar
+
+	inc r10
 	jmp .roll_string
 
 .string_end:
-	; write (fd, *buf, count)
-	mov rax, 1h
-
-	sub rdi, rsi
-	mov rdx, rdi
-	; rsi is rsi :)
-	mov rdi, 1
-	syscall
-
+	pop r10
 	pop rsi
 
 	inc rbx
@@ -234,6 +217,7 @@ switch:
 	xor rax, rax
 	ret
 
+
 printHexNumber:
 	mov r8, 4
 	jmp printXOBNumber
@@ -273,6 +257,36 @@ printXOBNumber:
 
 	; (64 / r8)
 	mov rcx, rax
+
+ 	dec rcx
+ 
+ .phn_skip_zeros:
+ 	mov rdx, rbx
+ 
+ 	push rcx
+ 
+ 	mov rsi, 1
+ 	mov cl, r8b
+ 	shl rsi, cl
+ 	dec rsi
+ 	and rdx, rsi
+ 
+ 	test rdx, rdx
+ 	jnz .stop_skipping_pop
+ 
+ 	mov cl, r8b
+ 	rol rbx, cl
+ 
+ 	pop rcx
+ 	loop .phn_skip_zeros
+ 
+ 	jmp .stop_skipping
+ 
+ .stop_skipping_pop:
+ 	pop rcx
+ .stop_skipping:
+ 	inc rcx
+
 .phn_loop_pr_dg:
 	mov rdx, rbx
 
@@ -312,12 +326,9 @@ printDecimalNumber:
 	cmp rbx, 0
 	jge .not_negative
 
-	mov rax, 1
-	mov rdi, 1
-	push '-'
-	mov rsi, rsp
-	mov rdx, 1
-	syscall
+	push rax
+	mov al, '-'
+	call printChar
 	pop rax
 
 	neg rbx
@@ -372,13 +383,73 @@ printDigit:
 	
 	push rdx
 
-	; write (fd, *buf, count)
-	mov rax, 1
-	mov rdi, 1
-	mov rsi, rsp
-	mov rdx, 1
-	syscall
+	mov al, dl
+	call printChar
 
 	pop rdx
 
 	ret
+
+;------------------------------------------------------
+; Prints AL to buffer
+; Destroys: RCX, RAX, RDI, RSI, RDX, R11
+;------------------------------------------------------
+printChar:
+	mov rcx, [rel my_printf_buffer_size]	
+
+	cmp rcx, BUFFER_SIZE
+	jl .append_buffer	
+
+	push rax
+	call forcePrintBuffer
+	pop rax
+
+.append_buffer:
+	lea rdi, [rel my_printf_buffer]
+	mov byte [rdi + rcx], al
+	inc rcx
+	mov [rel my_printf_buffer_size], rcx
+
+	cmp al, 0x0A
+	jne .exit
+	call forcePrintBuffer
+
+.exit:
+	ret
+
+forcePrintBuffer:
+	mov rcx, [rel my_printf_buffer_size]
+
+	; write (fd, *buf, count)
+	mov rax, 1
+	mov rdi, 1
+	lea rsi, [rel my_printf_buffer]
+	mov rdx, rcx
+	syscall
+
+	xor rcx, rcx
+	mov [rel my_printf_buffer_size], rcx
+	ret
+
+
+
+section .rodata
+fmt_jump_table:
+	dq parse_fmt_internal.unknown_code				; a
+	dq parse_fmt_internal.binary_fmt				; b
+	dq parse_fmt_internal.char_fmt					; c
+	dq parse_fmt_internal.decimal_fmt				; d
+	times ('o' - 'd' - 1) dq parse_fmt_internal.unknown_code	; ('d', 'o')
+	dq parse_fmt_internal.octal_fmt					; o
+	times ('s' - 'o' - 1) dq parse_fmt_internal.unknown_code	; ('d', 'o')
+	dq parse_fmt_internal.string_fmt				; s
+	times ('x' - 's' - 1) dq parse_fmt_internal.unknown_code	; ('s', 'x')
+	dq parse_fmt_internal.hex_fmt					; x
+	times ('z' - 'x')     dq parse_fmt_internal.unknown_code	; ('x', 'z']
+
+
+section .data
+my_printf_buffer_size: dq 0x00
+my_printf_buffer:
+	times (BUFFER_SIZE) db 0x00
+main_ret: dq 0x00
