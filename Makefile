@@ -13,9 +13,9 @@ printf.o: printf.s
 	@ # ld $(LDFLAGS) -o printf printf.o
 
 printf_test: printf_test.c printf.o
-	gcc printf_test.c printf.o -fPIE -ggdb3 -o printf_test
+	gcc printf_test.c printf.o -lm -fPIE -ggdb3 -o printf_test
 
 clean:
-	rm -rf printf.o printf.lst
+	rm -rf printf.o printf.lst printf_test
 
 

@@ -1,4 +1,5 @@
 global my_printf
+global my_printf_main_ret
 extern printf
 
 %define printf_reg_ptr rbp + rbx * 8 + 24
@@ -17,6 +18,9 @@ my_printf:
 
 	push r10
 
+	; r9 will be used for counting xmm registers left
+	mov r9, rax
+
 	call my_printf_internal
 
 	pop r10
@@ -27,15 +31,18 @@ my_printf:
 	pop rcx
 	pop r8
 	pop r9
-	xor rax, rax
 
-	; ret
-
-	; push r10 ; ret to caller
-	mov [rel main_ret], r10
+	push rax
+	mov rax, [rel my_printf_main_ret WRT ..gottpoff]
+	mov [fs:rax], r10
+	pop rax
 	call printf WRT ..plt
-	mov r10, [rel main_ret]
+	push rax
+	mov rax, [rel my_printf_main_ret WRT ..gottpoff]
+	mov r10, [fs:rax]
+	pop rax
 	push r10
+
 	ret
 
 ;--------------------------------------------
@@ -54,6 +61,13 @@ my_printf_internal:
 	mov rbp, rsp
 
 	push rbx
+
+	sub rsp, 16
+	movups [rsp], xmm0
+	push r12
+	push rax
+
+	xor r12, r12
 
 	xor rbx, rbx
 
@@ -89,6 +103,12 @@ my_printf_internal:
 
 .exit:
 	mov rax, rbx
+
+	pop rax
+	pop r12
+	movups xmm0, [rsp]
+	add rsp, 16
+
 	pop rbx
 	pop rbp
 	ret
@@ -147,25 +167,10 @@ parse_fmt_internal:
 .string_fmt:
 	push rsi
 
-	xor rdi, rdi
 	mov rsi, [printf_reg_ptr]
-
-	push r10
-	mov r10, rsi
-
-.roll_string:
-	mov al, byte [r10]
-
-	test al, al
-	jz .string_end
-
-	call printChar
-
-	inc r10
-	jmp .roll_string
+	call printString
 
 .string_end:
-	pop r10
 	pop rsi
 
 	inc rbx
@@ -200,6 +205,7 @@ parse_fmt_internal:
 
 	mov rdi, [printf_reg_ptr]
 
+	xor r8, r8
 	call printDecimalNumber
 
 	pop rsi
@@ -209,6 +215,13 @@ parse_fmt_internal:
 
 	jmp .exit_success
 
+.float_fmt:
+	mov rdx, 0
+
+	call printfFloatingPoint
+
+	inc rsi
+	jmp .exit_success
 .unknown_code:
 	mov rax, 1
 	ret
@@ -310,9 +323,9 @@ printXOBNumber:
 	ret
 
 ;------------------------------------------------------
-; Prints 8-byte number from rdi in hex/octal/binary to fd 1
+; Prints 8-byte number from rdi in decimal to fd 1
 ;
-; Pass r8 = 4 for hex; r8 = 3 for octal; r8 = 1 for binary
+; If you want to pad the number to >=k digs, pass r8 = k (non-zero)
 ;
 ; Entry: RDI, R8
 ; Destroys: RAX, RDX, RCX, R11, RDI
@@ -321,7 +334,7 @@ printDecimalNumber:
 	push rbx
 
 	mov rbx, rdi
-	mov r8, 10
+	mov r9, 10
 
 	cmp rbx, 0
 	jge .not_negative
@@ -334,7 +347,6 @@ printDecimalNumber:
 	neg rbx
 
 .not_negative:
-
 	mov rax, rbx
 
 	xor rcx, rcx
@@ -343,14 +355,24 @@ printDecimalNumber:
 	test rax, rax
 	jz .ld_exit
 	xor rdx, rdx
-	div r8
+	div r9
 
 	push rdx
 	inc rcx
 
-	jmp .loop_decimal
+	jmp .loop_decimal	
 
 .ld_exit:
+
+.loop_decimal_feed:
+	cmp rcx, r8
+	jge .ldf_exit
+
+	push 0
+	inc rcx
+	jmp .loop_decimal_feed
+	
+.ldf_exit:
 	test rcx, rcx
 	jnz .loop_print
 
@@ -390,6 +412,304 @@ printDigit:
 
 	ret
 
+%macro push_xmm 1
+	sub rsp, 16
+	movups [rsp], %1
+%endmacro
+%macro pop_xmm 1
+	movups %1, [rsp]
+	add rsp, 16
+%endmacro
+
+;---------------------
+; 0 if finite(not nan/inf), 1 otherwise
+;---------------------
+isfinite:
+	mov rdx, qword (-1) >> 1
+	and rax, rdx
+	mov rdx, 7ffh << 52
+	cmp rax, rdx
+	jl .finite
+	mov rax, 1
+	ret
+
+.finite:
+	xor rax, rax
+	ret
+
+;---------------------
+; 0 if nan, 1 otherwise
+;---------------------
+isinf:
+	mov rdx, qword (-1) >> 1
+	and rax, rdx
+	mov rdx, 7ffh << 52
+	cmp rax, rdx
+	je .inf
+	mov rax, 1
+	ret
+
+.inf:
+	xor rax, rax
+	ret
+
+
+;-------------------------------------
+; Prints the 64-bit floating-point
+; Modifies r9 and rbx
+; Destroys r8, rax, xmm0
+;-------------------------------------
+printfFloatingPoint:
+	call exchangeABIXMM
+	
+	movq rax, xmm0
+
+	push rax
+
+	; test for sign
+	mov rdx, 1 << 63
+	and rax, rdx
+	test rax, rax
+	jz .fin_sign
+
+	push rsi
+	mov al, '-'
+	call printChar
+	pop rsi
+
+.fin_sign:
+	mov rax, [rsp]
+
+	call isfinite
+	test rax, rax
+	jz .finite
+
+	mov rax, [rsp]
+
+	call isinf
+	test rax, rax
+	jz .inf	
+
+	push rsi
+	lea rsi, [rel nan_string]
+	call printString
+	pop rsi
+
+	pop rax
+	ret
+
+.inf:	
+	push rsi
+	lea rsi, [rel inf_string]
+	call printString
+	pop rsi
+
+	pop rax
+	ret
+
+.finite:
+
+	push rsi
+
+	push_xmm xmm0
+	push_xmm xmm1
+
+	movq rax, xmm0
+	mov rdx, ~(1 << 63)
+	and rax, rdx
+	movq xmm0, rax
+
+	call printfFloatingPointTruncated
+	; call printfFloatingPointAdvanced
+
+
+	pop_xmm xmm1
+	pop_xmm xmm0
+	pop rsi
+
+	pop rax
+
+
+	ret
+
+%assign FLOAT_PRECISION 6
+%assign FLOAT_MUL 1000000; 10 ** FLOAT_PRECISION
+
+printfFloatingPointTruncated:
+	; truncated integer part of double
+	cvttsd2si rdi, xmm0
+	push rdi
+	
+	xor r8, r8
+	call printDecimalNumber
+
+	mov al, '.'
+	call printChar
+
+	pop rdi
+
+	; integer to double
+	cvtsi2sd xmm1, rdi
+	subsd xmm0, xmm1
+
+	mov rax, FLOAT_MUL
+	cvtsi2sd xmm1, rax
+
+	mulsd xmm0, xmm1
+
+	cvttsd2si rdi, xmm0
+	mov r8, FLOAT_PRECISION
+	call printDecimalNumber
+
+	ret
+
+;----------------------------
+; Takes double FP number in xmm0
+; Returns binary exp = rdx, normalized fp = xmm0
+; https://elixir.bootlin.com/musl/v1.2.6/source/src/math/frexp.c
+;----------------------------
+fp_exponent:
+	movq rdx, xmm0
+	shr rdx, 52
+	and rdx, 7ffh
+
+	; test for subnormal
+	test rdx, rdx
+	jnz .exchange_normal_form
+
+	ptest xmm0, xmm0
+	jnz .exchange_subnormal
+
+	xor rax, rax
+	ret
+
+.exchange_subnormal:
+	movq rdx, xmm0
+	mov rax, 64
+	shl rax, 52
+	or rdx, rax
+	movq xmm0, rdx
+	call fp_exponent
+
+	sub rdx, 64
+	ret
+
+.exchange_normal_form:
+	cmp rdx, 7ffh
+	jne .exchange_nf_nt
+
+	ret
+
+.exchange_nf_nt:
+	sub rdx, 3feh
+	movq rax, xmm0
+
+	mov rdi, 800fffffffffffffh
+	and rax, rdi
+
+	mov rdi, 3fe0000000000000h
+	or rax, rdi
+
+	movq xmm0, rax
+	ret
+
+
+
+printfFloatingPointAdvanced:
+	push_xmm xmm1
+
+	; xmm0 = norm fp, rdx = bin exp
+	call fp_exponent
+
+	ptest xmm0, xmm0
+	jz .exit
+
+	mov rax, FLOAT_MUL
+	cvtsi2sd xmm1, rax
+
+	mulsd xmm0, xmm1
+	cvttsd2si rax, xmm0
+	cvtsi2sd xmm1, rax
+
+	push rdi
+	mov rdi, rax
+	xor r8, r8
+	call printDecimalNumber
+	pop rdi
+
+	subsd xmm0, xmm1
+
+
+
+.exit:
+	pop_xmm xmm1
+	ret
+
+
+;-------------------------------------
+; Exchanges printf floating-point to xmm0 register
+; Entry: r9, rbx - general
+; Modifies r9 and rbx
+; Destroys r8, rax, xmm0
+;-------------------------------------
+exchangeABIXMM:
+	test r9, r9
+	jz .exchange_from_stack
+
+	dec r9
+	
+	lea rax, [rel .ex_a]
+	lea rax, [rax + r12 * (.ex_b - .ex_a)]
+	jmp rax
+
+	align 8
+
+%macro  exchangeXMM 1
+	movaps xmm0, xmm%1
+	jmp .exit
+	align 8
+%endmacro
+
+.ex_a:
+	exchangeXMM 0
+.ex_b:
+	exchangeXMM 1
+	exchangeXMM 2
+	exchangeXMM 3
+	exchangeXMM 4
+	exchangeXMM 5
+	exchangeXMM 6
+	exchangeXMM 7
+
+.exchange_from_stack:
+	movsd xmm0, [printf_reg_ptr]
+	inc rbx
+
+.exit:
+	inc r12
+	ret
+
+
+;---------------------------------------------------
+; Prints string from rsi ptr to buffer
+; Destroys everythin printChar destroys + rsi
+;---------------------------------------------------
+printString:
+.roll_string:
+	mov al, byte [rsi]
+
+	test al, al
+	jz .exit
+
+	push rsi
+	call printChar
+	pop rsi
+
+	inc rsi
+	jmp .roll_string
+
+.exit:
+	ret
 ;------------------------------------------------------
 ; Prints AL to buffer
 ; Destroys: RCX, RAX, RDI, RSI, RDX, R11
@@ -434,12 +754,17 @@ forcePrintBuffer:
 
 
 section .rodata
+	inf_string: db "inf", 0h
+	nan_string: db "nan", 0h
+	finite_string: db "finite", 0h
 fmt_jump_table:
 	dq parse_fmt_internal.unknown_code				; a
 	dq parse_fmt_internal.binary_fmt				; b
 	dq parse_fmt_internal.char_fmt					; c
 	dq parse_fmt_internal.decimal_fmt				; d
-	times ('o' - 'd' - 1) dq parse_fmt_internal.unknown_code	; ('d', 'o')
+	dq parse_fmt_internal.unknown_code				; e
+	dq parse_fmt_internal.float_fmt					; f
+	times ('o' - 'f' - 1) dq parse_fmt_internal.unknown_code	; ('f', 'o')
 	dq parse_fmt_internal.octal_fmt					; o
 	times ('s' - 'o' - 1) dq parse_fmt_internal.unknown_code	; ('d', 'o')
 	dq parse_fmt_internal.string_fmt				; s
@@ -448,8 +773,9 @@ fmt_jump_table:
 	times ('z' - 'x')     dq parse_fmt_internal.unknown_code	; ('x', 'z']
 
 
-section .data
-my_printf_buffer_size: dq 0x00
-my_printf_buffer:
-	times (BUFFER_SIZE) db 0x00
-main_ret: dq 0x00
+section .tbss
+my_printf_main_ret: resq 1
+
+section .bss
+my_printf_buffer_size: resq 1
+my_printf_buffer: resb (BUFFER_SIZE)
