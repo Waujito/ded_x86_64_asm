@@ -5,7 +5,7 @@ run: build
 
 mandelbrot: mandelbrot.c
 	mkdir -p ./build
-	gcc -O2 -lSDL3 -lm mandelbrot.c -o ./build/mandelbrot
+	gcc -Og -lSDL3 -lm -ggdb3 mandelbrot.c -o ./build/mandelbrot
 
 clean:
 	rm -rf build/mandelbrot

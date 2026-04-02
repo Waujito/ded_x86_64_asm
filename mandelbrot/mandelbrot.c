@@ -6,7 +6,7 @@
 
 #define eprintf(...) fprintf(stderr, ##__VA_ARGS__)
 
-#define CONTINUOUS_KEY_SPEED (9e-10f)
+#define CONTINUOUS_KEY_SPEED (9e-10)
 
 enum {
 	KDOWN_IDX = 0,
@@ -25,9 +25,9 @@ typedef struct SDLState {
 	int width;
 	int height;
 
-	float shift_left;
-	float shift_up;
-	float zoom;
+	double shift_left;
+	double shift_up;
+	double zoom;
 
 	bool key_used[KLEN];
 	uint64_t key_timestamps[KLEN];
@@ -69,7 +69,9 @@ void sdl_destroy(SDLState *state) {
 	SDL_Quit();
 }
 
-#define MAX_ITER (256)
+#define MAX_ITER (255)
+#define STEP_ARR_LEN (4)
+#define STOP_RADIUS (10.)
 
 int renderMandelbrotTexture(SDLState *state, SDL_Texture *texture) {
 	void *pixels;
@@ -85,26 +87,36 @@ int renderMandelbrotTexture(SDLState *state, SDL_Texture *texture) {
 	int width = texture->w;
 
 	for (int y = 0; y < height; y++) {
-		for (int x = 0; x < width; x++) {
-			float cr = (x * 2.f - width) / width;
-			float ci = (y * 2.f - height) / height;
+		double cy = (2. * y) / height - 1;
+		cy *= state->zoom / 1.25;
+		cy -= state->shift_up;
 
-			cr *= state->zoom;
-			ci *= state->zoom;
-			cr -= state->shift_left;
-			ci -= state->shift_up;
+		double cx = (-1.) * state->zoom - state->shift_left;
+		double dx = 2. * state->zoom / width;
 
-			float zr = 0, zi = 0;
+		for (int x = 0; x < width; x++, cx += dx) {
+			double zx = 0, zy = 0;
 
 			int iter = 0;
-			while (zr * zr + zi * zi <= 4.f && iter < MAX_ITER) {
-				float next_zr = zr * zr - zi * zi + cr;
-				zi = 2.f * zr * zi + ci;
-				zr = next_zr;
-				iter++;
+
+			for (iter = 0;iter < MAX_ITER; iter++) {
+				// next_z = z^2 + c
+				// z = x + iy; z^2 = (x^2 - y^2) + i(2xy)
+
+				double next_zx = zx * zx - zy * zy + cx;
+
+				zy = zx * zy;
+				zy += zy;
+				zy += cy;
+
+				zx = next_zx;
+
+				if (zx * zx + zy * zy > STOP_RADIUS)
+					break;
 			}
 
-			uint32_t color = (iter == MAX_ITER) ? 0 : (iter * 0x00000505);
+			uint32_t color = (iter == MAX_ITER) ? 0 : 
+				(iter % 43 << 20) + (iter % 91 << 9) + iter;
 
 			pixels_ptr[y * (pitch / sizeof(*pixels_ptr)) + x] = color;
 		}
@@ -138,7 +150,7 @@ int continuous_key_event(SDLState *state, int keyid, bool pressed, uint64_t time
 	bool *key_used = &state->key_used[keyid];
 	uint64_t *key_last_timestamp = &state->key_timestamps[keyid];
 
-	float timediff = 0;
+	double timediff = 0;
 
 	if (pressed) {
 		if (*key_used) {
@@ -156,8 +168,8 @@ int continuous_key_event(SDLState *state, int keyid, bool pressed, uint64_t time
 	}
 
 	timediff *= CONTINUOUS_KEY_SPEED;
-	float shift_bias = timediff * state->zoom;
-	float zoom_bias = expf(-timediff);
+	double shift_bias = timediff * state->zoom;
+	double zoom_bias = exp(-timediff);
 
 
 	switch (keyid) {
@@ -222,9 +234,9 @@ int main() {
 		return 1;
 	}
 
-	state.shift_left = 0.f;
-	state.shift_up = 0.f;
-	state.zoom = 1.f;
+	state.shift_left = 1.;
+	state.shift_up = 0.;
+	state.zoom = 1.;
 
 	int running = 1;
 
