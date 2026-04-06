@@ -97,45 +97,52 @@ int renderMandelbrotTexture(SDLState *state, SDL_Texture *texture) {
 		cy -= state->shift_up;
 
 		for (int x = 0; x < width; x += STEP_ARR_LEN) {
-			double zxs[STEP_ARR_LEN] = {0};
-			double zys[STEP_ARR_LEN] = {0};
+			__m256d zxs = _mm256_setzero_pd();
+			__m256d zys = _mm256_setzero_pd();
 
-			double cys[STEP_ARR_LEN] = { cy, cy, cy, cy };
+			__m256d cys = _mm256_set1_pd(cy);
 
-			double cxs[STEP_ARR_LEN] = { x, x + 1, x + 2, x + 3 };
+			__m256d cxs = _mm256_set_pd(0, 1., 2., 3.);
+			cxs = _mm256_add_pd(cxs, _mm256_set1_pd((double)x));
+			cxs = _mm256_mul_pd(cxs, _mm256_set1_pd(2. / width));
+			cxs = _mm256_sub_pd(cxs, _mm256_set1_pd(1.));
+			cxs = _mm256_mul_pd(cxs, _mm256_set1_pd(state->zoom));
+			cxs = _mm256_sub_pd(cxs, _mm256_set1_pd(state->shift_left));
 
-			for (int i = 0; i < STEP_ARR_LEN; i++) { cxs[i] *= 2./width; }
-			for (int i = 0; i < STEP_ARR_LEN; i++) { cxs[i] -= 1.; }
-			for (int i = 0; i < STEP_ARR_LEN; i++) { cxs[i] *= state->zoom; }
-			for (int i = 0; i < STEP_ARR_LEN; i++) { cxs[i] -= state->shift_left; }
+			__m256i iters = _mm256_setzero_si256();
 
-			int iters[STEP_ARR_LEN] = {0};
 			for (int i = 0; i < MAX_ITER; i++) {
-				double zx_dbs[STEP_ARR_LEN];
-				double zy_dbs[STEP_ARR_LEN];
-				double zxy_dbs[STEP_ARR_LEN];
-				int incs[STEP_ARR_LEN] = {0};
+				__m256d zx_dbs = _mm256_mul_pd(zxs, zxs);
+				__m256d zy_dbs = _mm256_mul_pd(zys, zys);
+				__m256d zxy_dbs = _mm256_mul_pd(zxs, zys);
+				// * .2
+				zxy_dbs = _mm256_add_pd(zxy_dbs, zxy_dbs);
 
-				for (int i = 0; i < STEP_ARR_LEN; i++) { zx_dbs[i] = zxs[i] * zxs[i]; }
-				for (int i = 0; i < STEP_ARR_LEN; i++) { zy_dbs[i] = zys[i] * zys[i]; }
-				for (int i = 0; i < STEP_ARR_LEN; i++) { zxy_dbs[i] = 2. * zxs[i] * zys[i]; }
-				
-				for (int i = 0; i < STEP_ARR_LEN; i++) { zxs[i] = zx_dbs[i] - zy_dbs[i]; }
-				for (int i = 0; i < STEP_ARR_LEN; i++) { zxs[i] += cxs[i]; }
+				zxs = _mm256_sub_pd(zx_dbs, zy_dbs);
+				zxs = _mm256_add_pd(zxs, cxs);
 
-				for (int i = 0; i < STEP_ARR_LEN; i++) { zys[i] = zxy_dbs[i]; }
-				for (int i = 0; i < STEP_ARR_LEN; i++) { zys[i] += cys[i]; }
+				zys = _mm256_add_pd(zxy_dbs, cys);
 
-				for (int i = 0; i < STEP_ARR_LEN; i++) { incs[i] = (zx_dbs[i] + zy_dbs[i] <= STOP_RADIUS); }
 
-				for (int i = 0; i < STEP_ARR_LEN; i++) { iters[i] += incs[i]; }
-				int sm = 0;
-				for (int i = 0; i < STEP_ARR_LEN; i++) { sm += incs[i]; }
+				__m256d z_modulos = _mm256_add_pd(zx_dbs, zy_dbs);
+				__m256d compr_results = _mm256_cmp_pd(z_modulos,
+						_mm256_set1_pd(STOP_RADIUS), _CMP_LE_OQ);
+
+				__m256d one256 = _mm256_castsi256_pd(_mm256_set1_epi64x(1));
+				int sm = _mm256_movemask_pd(compr_results);
+				compr_results = _mm256_and_pd(compr_results, one256);
+				iters = _mm256_add_epi64(iters, _mm256_castpd_si256(compr_results));
+
 				if (!sm) break;
 			}
 
-			for (int i = 0; i < STEP_ARR_LEN; i++) {
-				int iter = iters[i];
+			int64_t iters_arr[STEP_ARR_LEN];
+			_mm256_storeu_si256((__m256i*)iters_arr, iters);
+			// We should go in reverse because of little-endianness
+			int j = STEP_ARR_LEN - 1;
+
+			for (int i = 0; i < STEP_ARR_LEN; i++, j--) {
+				int iter = iters_arr[j];
 				uint32_t color = (iter == MAX_ITER) ? 0 : 
 					(iter % 43 << 20) + (iter % 91 << 9) + iter;
 
@@ -149,6 +156,7 @@ int renderMandelbrotTexture(SDLState *state, SDL_Texture *texture) {
 	SDL_UnlockTexture(texture);
 	return 0;
 }
+
 
 int map_key_scancode_idx(unsigned int sdl_idx) {
 	switch (sdl_idx) {
