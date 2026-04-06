@@ -3,6 +3,9 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <math.h>
+#include <immintrin.h>
+
+// #define double float
 
 #define eprintf(...) fprintf(stderr, ##__VA_ARGS__)
 
@@ -73,6 +76,7 @@ void sdl_destroy(SDLState *state) {
 #define STEP_ARR_LEN (4)
 #define STOP_RADIUS (10.)
 
+
 int renderMandelbrotTexture(SDLState *state, SDL_Texture *texture) {
 	void *pixels;
         int pitch;
@@ -85,40 +89,59 @@ int renderMandelbrotTexture(SDLState *state, SDL_Texture *texture) {
 
 	int height = texture->h;
 	int width = texture->w;
-
+	
+	// #pragma omp parallel for
 	for (int y = 0; y < height; y++) {
 		double cy = (2. * y) / height - 1;
 		cy *= state->zoom / 1.25;
 		cy -= state->shift_up;
 
-		double cx = (-1.) * state->zoom - state->shift_left;
-		double dx = 2. * state->zoom / width;
+		for (int x = 0; x < width; x += STEP_ARR_LEN) {
+			double zxs[STEP_ARR_LEN] = {0};
+			double zys[STEP_ARR_LEN] = {0};
 
-		for (int x = 0; x < width; x++, cx += dx) {
-			double zx = 0, zy = 0;
+			double cys[STEP_ARR_LEN] = { cy, cy, cy, cy };
 
-			int iter = 0;
+			double cxs[STEP_ARR_LEN] = { x, x + 1, x + 2, x + 3 };
 
-			for (iter = 0;iter < MAX_ITER; iter++) {
-				// next_z = z^2 + c
-				// z = x + iy; z^2 = (x^2 - y^2) + i(2xy)
+			for (int i = 0; i < STEP_ARR_LEN; i++) { cxs[i] *= 2./width; }
+			for (int i = 0; i < STEP_ARR_LEN; i++) { cxs[i] -= 1.; }
+			for (int i = 0; i < STEP_ARR_LEN; i++) { cxs[i] *= state->zoom; }
+			for (int i = 0; i < STEP_ARR_LEN; i++) { cxs[i] -= state->shift_left; }
 
-				double next_zx = zx * zx - zy * zy + cx;
+			int iters[STEP_ARR_LEN] = {0};
+			for (int i = 0; i < MAX_ITER; i++) {
+				double zx_dbs[STEP_ARR_LEN];
+				double zy_dbs[STEP_ARR_LEN];
+				double zxy_dbs[STEP_ARR_LEN];
+				int incs[STEP_ARR_LEN] = {0};
 
-				zy = zx * zy;
-				zy += zy;
-				zy += cy;
+				for (int i = 0; i < STEP_ARR_LEN; i++) { zx_dbs[i] = zxs[i] * zxs[i]; }
+				for (int i = 0; i < STEP_ARR_LEN; i++) { zy_dbs[i] = zys[i] * zys[i]; }
+				for (int i = 0; i < STEP_ARR_LEN; i++) { zxy_dbs[i] = 2. * zxs[i] * zys[i]; }
+				
+				for (int i = 0; i < STEP_ARR_LEN; i++) { zxs[i] = zx_dbs[i] - zy_dbs[i]; }
+				for (int i = 0; i < STEP_ARR_LEN; i++) { zxs[i] += cxs[i]; }
 
-				zx = next_zx;
+				for (int i = 0; i < STEP_ARR_LEN; i++) { zys[i] = zxy_dbs[i]; }
+				for (int i = 0; i < STEP_ARR_LEN; i++) { zys[i] += cys[i]; }
 
-				if (zx * zx + zy * zy > STOP_RADIUS)
-					break;
+				for (int i = 0; i < STEP_ARR_LEN; i++) { incs[i] = (zx_dbs[i] + zy_dbs[i] <= STOP_RADIUS); }
+
+				for (int i = 0; i < STEP_ARR_LEN; i++) { iters[i] += incs[i]; }
+				int sm = 0;
+				for (int i = 0; i < STEP_ARR_LEN; i++) { sm += incs[i]; }
+				if (!sm) break;
 			}
 
-			uint32_t color = (iter == MAX_ITER) ? 0 : 
-				(iter % 43 << 20) + (iter % 91 << 9) + iter;
+			for (int i = 0; i < STEP_ARR_LEN; i++) {
+				int iter = iters[i];
+				uint32_t color = (iter == MAX_ITER) ? 0 : 
+					(iter % 43 << 20) + (iter % 91 << 9) + iter;
 
-			pixels_ptr[y * (pitch / sizeof(*pixels_ptr)) + x] = color;
+				pixels_ptr[y * (pitch / sizeof(*pixels_ptr)) + x + i] = color;
+			}
+
 		}
 	}
 
