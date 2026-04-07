@@ -39,6 +39,16 @@ run_float_simple_tests() {
 	run_tests | test_format_name "float_simple"
 }
 
+run_double_gcc_optim_tests() {
+	make MANDELBROT_CALC_FILE="mandelbrot_calc_gcc_optim.c"  1>&2
+	run_tests | test_format_name "double_gcc_optim"
+}
+
+run_float_gcc_optim_tests() {
+	make MANDELBROT_CALC_FILE="mandelbrot_calc_gcc_optim.c" BENCH_CFLAGS="-DMBT_MANDELBROT_FLOATS" 1>&2
+	run_tests | test_format_name "float_gcc_optim"
+}
+
 test_format_name() {
 	sed "s/^/$1,/"
 }
@@ -49,5 +59,8 @@ echo "$HEAD"
 #run_double_tests
 #run_float_tests
 
-run_double_simple_tests
-run_float_simple_tests
+#run_double_simple_tests
+#run_float_simple_tests
+
+run_double_gcc_optim_tests
+run_float_gcc_optim_tests

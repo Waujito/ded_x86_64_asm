@@ -1,4 +1,4 @@
-MANDELBROT_CALC_FILE:=mandelbrot_calc_intrin.c
+MANDELBROT_CALC_FILE:=mandelbrot_calc_gcc_optim.c
 
 build: mandelbrot mandelbrot_bench
 
@@ -11,7 +11,7 @@ run_bench: build
 
 mandelbrot: mandelbrot_calc.h $(MANDELBROT_CALC_FILE) mandelbrot.c
 	mkdir -p ./build
-	gcc -O3 -DMBT_PARALLEL_RENDER -fopenmp -march=native -lSDL3 -lm -ggdb3 $(MANDELBROT_CALC_FILE) mandelbrot.c -o ./build/mandelbrot
+	gcc -O3 -fopenmp -march=native -lSDL3 -lm -ggdb3 $(MANDELBROT_CALC_FILE) mandelbrot.c -o ./build/mandelbrot
 
 mandelbrot_bench: mandelbrot_calc.h $(MANDELBROT_CALC_FILE) mandelbrot_bench.c
 	mkdir -p ./build
