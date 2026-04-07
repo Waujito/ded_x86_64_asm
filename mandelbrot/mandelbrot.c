@@ -3,7 +3,8 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <math.h>
-#include <immintrin.h>
+
+#include "mandelbrot_calc.h"
 
 // #define double float
 
@@ -28,9 +29,7 @@ typedef struct SDLState {
 	int width;
 	int height;
 
-	double shift_left;
-	double shift_up;
-	double zoom;
+	struct MandelbrotState set_state;
 
 	bool key_used[KLEN];
 	uint64_t key_timestamps[KLEN];
@@ -72,10 +71,6 @@ void sdl_destroy(SDLState *state) {
 	SDL_Quit();
 }
 
-#define MAX_ITER (255)
-#define STEP_ARR_LEN (4)
-#define STOP_RADIUS (10.)
-
 
 int renderMandelbrotTexture(SDLState *state, SDL_Texture *texture) {
 	void *pixels;
@@ -89,69 +84,8 @@ int renderMandelbrotTexture(SDLState *state, SDL_Texture *texture) {
 
 	int height = texture->h;
 	int width = texture->w;
-	
-	// #pragma omp parallel for
-	for (int y = 0; y < height; y++) {
-		double cy = (2. * y) / height - 1;
-		cy *= state->zoom / 1.25;
-		cy -= state->shift_up;
 
-		for (int x = 0; x < width; x += STEP_ARR_LEN) {
-			__m256d zxs = _mm256_setzero_pd();
-			__m256d zys = _mm256_setzero_pd();
-
-			__m256d cys = _mm256_set1_pd(cy);
-
-			__m256d cxs = _mm256_set_pd(0, 1., 2., 3.);
-			cxs = _mm256_add_pd(cxs, _mm256_set1_pd((double)x));
-			cxs = _mm256_mul_pd(cxs, _mm256_set1_pd(2. / width));
-			cxs = _mm256_sub_pd(cxs, _mm256_set1_pd(1.));
-			cxs = _mm256_mul_pd(cxs, _mm256_set1_pd(state->zoom));
-			cxs = _mm256_sub_pd(cxs, _mm256_set1_pd(state->shift_left));
-
-			__m256i iters = _mm256_setzero_si256();
-
-			for (int i = 0; i < MAX_ITER; i++) {
-				__m256d zx_dbs = _mm256_mul_pd(zxs, zxs);
-				__m256d zy_dbs = _mm256_mul_pd(zys, zys);
-				__m256d zxy_dbs = _mm256_mul_pd(zxs, zys);
-				// * .2
-				zxy_dbs = _mm256_add_pd(zxy_dbs, zxy_dbs);
-
-				zxs = _mm256_sub_pd(zx_dbs, zy_dbs);
-				zxs = _mm256_add_pd(zxs, cxs);
-
-				zys = _mm256_add_pd(zxy_dbs, cys);
-
-
-				__m256d z_modulos = _mm256_add_pd(zx_dbs, zy_dbs);
-				__m256d compr_results = _mm256_cmp_pd(z_modulos,
-						_mm256_set1_pd(STOP_RADIUS), _CMP_LE_OQ);
-
-				__m256d one256 = _mm256_castsi256_pd(_mm256_set1_epi64x(1));
-				int sm = _mm256_movemask_pd(compr_results);
-				compr_results = _mm256_and_pd(compr_results, one256);
-				iters = _mm256_add_epi64(iters, _mm256_castpd_si256(compr_results));
-
-				if (!sm) break;
-			}
-
-			int64_t iters_arr[STEP_ARR_LEN];
-			_mm256_storeu_si256((__m256i*)iters_arr, iters);
-			// We should go in reverse because of little-endianness
-			int j = STEP_ARR_LEN - 1;
-
-			for (int i = 0; i < STEP_ARR_LEN; i++, j--) {
-				int iter = iters_arr[j];
-				uint32_t color = (iter == MAX_ITER) ? 0 : 
-					(iter % 43 << 20) + (iter % 91 << 9) + iter;
-
-				pixels_ptr[y * (pitch / sizeof(*pixels_ptr)) + x + i] = color;
-			}
-
-		}
-	}
-
+	calcMandelbrotSet(pixels_ptr, pitch, height, width, &state->set_state);
 
 	SDL_UnlockTexture(texture);
 	return 0;
@@ -199,28 +133,28 @@ int continuous_key_event(SDLState *state, int keyid, bool pressed, uint64_t time
 	}
 
 	timediff *= CONTINUOUS_KEY_SPEED;
-	double shift_bias = timediff * state->zoom;
+	double shift_bias = timediff * state->set_state.zoom;
 	double zoom_bias = exp(-timediff);
 
 
 	switch (keyid) {
 		case KDOWN_IDX:
-			state->shift_up -= shift_bias;
+			state->set_state.shift_up -= shift_bias;
 			break;
 		case KUP_IDX:
-			state->shift_up += shift_bias;
+			state->set_state.shift_up += shift_bias;
 			break;
 		case KLEFT_IDX:
-			state->shift_left += shift_bias;
+			state->set_state.shift_left += shift_bias;
 			break;
 		case KRIGHT_IDX:
-			state->shift_left -= shift_bias;
+			state->set_state.shift_left -= shift_bias;
 			break;
 		case KZOOM_INC_IDX:
-			state->zoom *= zoom_bias;
+			state->set_state.zoom *= zoom_bias;
 			break;
 		case KZOOM_DEC_IDX:
-			state->zoom /= zoom_bias;
+			state->set_state.zoom /= zoom_bias;
 			break;
 		default:
 			break;
@@ -265,9 +199,9 @@ int main() {
 		return 1;
 	}
 
-	state.shift_left = 1.;
-	state.shift_up = 0.;
-	state.zoom = 1.;
+	state.set_state.shift_left = 1.;
+	state.set_state.shift_up = 0.;
+	state.set_state.zoom = 1.;
 
 	int running = 1;
 
