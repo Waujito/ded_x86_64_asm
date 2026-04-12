@@ -41,7 +41,9 @@ static int pin_cpu(int cpu_id) {
 uint32_t pixels[WIDTH * HEIGHT];
 
 int main() {
+#ifndef MBT_PARALLEL_RENDER
 	pin_cpu(PIN_CPU_ID);
+#endif
 
 	struct MandelbrotState state = {
 		.shift_left = 0.,
@@ -60,10 +62,12 @@ int main() {
 	unsigned long long endClocks = __rdtscp(&rdt_id2);
 	END_TIMER();
 
+#ifndef MBT_PARALLEL_RENDER
 	if (rdt_id1 != rdt_id2) {
 		fprintf(stderr, "Assertion failed: proc migrated core\n");
 		abort();
 	}
+#endif
 
 	printf("clocks,ms\n");
 	printf("%llu,%f\n", endClocks - startClocks, TIME_DIFF());

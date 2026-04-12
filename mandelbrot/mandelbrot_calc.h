@@ -11,7 +11,12 @@ struct MandelbrotState {
 
 // #define MBT_MANDELBROT_FLOATS
 
+#if defined(MBT_PARALLEL_RENDER) && defined(MBT_BENCHMARK)
+#define MBT_MAX_ITER (2048)
+#else
 #define MBT_MAX_ITER (255)
+#endif
+
 #define MBT_STOP_RADIUS (10.)
 
 void calcMandelbrotDoubleSet(uint32_t *pixels_ptr, int pitch, int height, int width,

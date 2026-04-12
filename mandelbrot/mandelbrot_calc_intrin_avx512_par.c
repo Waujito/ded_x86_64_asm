@@ -1,13 +1,22 @@
+#pragma GCC optimize("unroll-loops")
 #include <stdint.h>
 #include <immintrin.h>
+#include <stdio.h>
 
 #include "mandelbrot_calc.h"
 
 // #define MBT_PARALLEL_RENDER
 // #define MBT_NO_EARLY_STOP
 
-#undef STEP_ARR_LEN
-#define STEP_ARR_LEN (16)
+
+#ifdef MBT_NCV_BATCH
+#define NCV_BATCH MBT_NCV_BATCH
+#else
+#define NCV_BATCH (2)
+#endif
+
+
+#define STEP_ARR_LEN (8 * NCV_BATCH)
 
 void calcMandelbrotDoubleSet(uint32_t *pixels_ptr, int pitch, int height, int width,
 			    struct MandelbrotState *state) {
@@ -21,71 +30,85 @@ void calcMandelbrotDoubleSet(uint32_t *pixels_ptr, int pitch, int height, int wi
 		cy -= state->shift_up;
 
 		for (int x = 0; x < width; x += STEP_ARR_LEN) {
-			__m512d zxs1 = _mm512_setzero_pd();
-			__m512d zxs2 = _mm512_setzero_pd();
+			__m512d zxses[NCV_BATCH];
+			__m512d zyses[NCV_BATCH];
+			__m512d cyses[NCV_BATCH];
+			__m512d cxses[NCV_BATCH];
+			__m512i iterses[NCV_BATCH];
+			__m512d zx_dbses[NCV_BATCH];
+			__m512d zy_dbses[NCV_BATCH];
+			__m512d zxy_dbses[NCV_BATCH];
+			__m512d z_moduloses[NCV_BATCH];
+			__mmask8 compr_results[NCV_BATCH];
 
-			__m512d zys1 = _mm512_setzero_pd();
-			__m512d zys2 = _mm512_setzero_pd();
+			for (int i = 0; i < NCV_BATCH; i++) { zxses[i] = _mm512_setzero_pd(); }
+			for (int i = 0; i < NCV_BATCH; i++) { zyses[i] = _mm512_setzero_pd(); }
 
-			__m512d cys1 = _mm512_set1_pd(cy);
-			__m512d cys2 = _mm512_set1_pd(cy);
+			for (int i = 0; i < NCV_BATCH; i++) { cyses[i] = _mm512_set1_pd(cy); }
 
-			__m512d cxs1 = _mm512_set_pd(0, 1., 2., 3., 4., 5., 6., 7.);
-			__m512d cxs2 = _mm512_set_pd(8., 9., 10., 11., 12., 13., 14., 15.);
+			for (int i = 0; i < NCV_BATCH; i++) { 
+				cxses[i] = _mm512_set_pd(0 + 8 * i, 1 + 8 * i, 2 + 8 * i,
+					3 + 8 * i, 4 + 8 * i, 5 + 8 * i, 6 + 8 * i, 7 + 8 * i);
+			}
 
-			cxs1 = _mm512_add_pd(cxs1, _mm512_set1_pd((double)x));
-			cxs2 = _mm512_add_pd(cxs2, _mm512_set1_pd((double)x));
+			for (int i = 0; i < NCV_BATCH; i++)
+				cxses[i] = _mm512_add_pd(cxses[i], _mm512_set1_pd((double)x));
 
-			cxs1 = _mm512_mul_pd(cxs1, _mm512_set1_pd(2. / width));
-			cxs2 = _mm512_mul_pd(cxs2, _mm512_set1_pd(2. / width));
+			for (int i = 0; i < NCV_BATCH; i++)
+				cxses[i] = _mm512_mul_pd(cxses[i], _mm512_set1_pd(2. / width));
 
-			cxs1 = _mm512_sub_pd(cxs1, _mm512_set1_pd(1.));
-			cxs2 = _mm512_sub_pd(cxs2, _mm512_set1_pd(1.));
+			for (int i = 0; i < NCV_BATCH; i++)
+				cxses[i] = _mm512_sub_pd(cxses[i], _mm512_set1_pd(1.));
 
-			cxs1 = _mm512_mul_pd(cxs1, _mm512_set1_pd(state->zoom));
-			cxs2 = _mm512_mul_pd(cxs2, _mm512_set1_pd(state->zoom));
+			for (int i = 0; i < NCV_BATCH; i++)
+				cxses[i] = _mm512_mul_pd(cxses[i], _mm512_set1_pd(state->zoom));
 
-			cxs1 = _mm512_sub_pd(cxs1, _mm512_set1_pd(state->shift_left));
-			cxs2 = _mm512_sub_pd(cxs2, _mm512_set1_pd(state->shift_left));
+			for (int i = 0; i < NCV_BATCH; i++)
+				cxses[i] = _mm512_sub_pd(cxses[i], _mm512_set1_pd(state->shift_left));
 
-			__m512i iters1 = _mm512_setzero_si512();
-			__m512i iters2 = _mm512_setzero_si512();
+			for (int i = 0; i < NCV_BATCH; i++)
+				iterses[i] = _mm512_setzero_si512();
 
 			for (int i = 0; i < MBT_MAX_ITER; i++) {
-				__m512d zx_dbs1 = _mm512_mul_pd(zxs1, zxs1);
-				__m512d zx_dbs2 = _mm512_mul_pd(zxs2, zxs2);
-				
-				__m512d zy_dbs1 = _mm512_mul_pd(zys1, zys1);
-				__m512d zy_dbs2 = _mm512_mul_pd(zys2, zys2);
-				
-				__m512d zxy_dbs1 = _mm512_mul_pd(zxs1, zys1);
-				__m512d zxy_dbs2 = _mm512_mul_pd(zxs2, zys2);
+				for (int i = 0; i < NCV_BATCH; i++)
+					zx_dbses[i] = _mm512_mul_pd(zxses[i], zxses[i]);
 
+				for (int i = 0; i < NCV_BATCH; i++)
+					zy_dbses[i] = _mm512_mul_pd(zyses[i], zyses[i]);
+
+				for (int i = 0; i < NCV_BATCH; i++)
+					zxy_dbses[i] = _mm512_mul_pd(zxses[i], zyses[i]);
+				
 				// * .2
-				zxy_dbs1 = _mm512_add_pd(zxy_dbs1, zxy_dbs1);
-				zxy_dbs2 = _mm512_add_pd(zxy_dbs2, zxy_dbs2);
+				for (int i = 0; i < NCV_BATCH; i++)
+					zxy_dbses[i] = _mm512_add_pd(zxy_dbses[i], zxy_dbses[i]);
 
-				zxs1 = _mm512_sub_pd(zx_dbs1, zy_dbs1);
-				zxs2 = _mm512_sub_pd(zx_dbs2, zy_dbs2);
+				for (int i = 0; i < NCV_BATCH; i++)
+					zxses[i] = _mm512_sub_pd(zx_dbses[i], zy_dbses[i]);
 
-				zxs1 = _mm512_add_pd(zxs1, cxs1);
-				zxs2 = _mm512_add_pd(zxs2, cxs2);
+				for (int i = 0; i < NCV_BATCH; i++)
+					zxses[i] = _mm512_add_pd(zxses[i], cxses[i]);
 
-				zys1 = _mm512_add_pd(zxy_dbs1, cys1);
-				zys2 = _mm512_add_pd(zxy_dbs2, cys2);
+				for (int i = 0; i < NCV_BATCH; i++)
+					zyses[i] = _mm512_add_pd(zxy_dbses[i], cyses[i]);
 
-				__m512d z_modulos1 = _mm512_add_pd(zx_dbs1, zy_dbs1);
-				__m512d z_modulos2 = _mm512_add_pd(zx_dbs2, zy_dbs2);
-				__mmask8 compr_results1 = _mm512_cmplt_pd_mask(z_modulos1,
-						_mm512_set1_pd(MBT_STOP_RADIUS));
-				__mmask8 compr_results2 = _mm512_cmplt_pd_mask(z_modulos2,
+				for (int i = 0; i < NCV_BATCH; i++)
+					z_moduloses[i] = _mm512_add_pd(zx_dbses[i], zy_dbses[i]);
+
+				for (int i = 0; i < NCV_BATCH; i++)
+					compr_results[i] = _mm512_cmplt_pd_mask(z_moduloses[i],
 						_mm512_set1_pd(MBT_STOP_RADIUS));
 
 				__m512i one512 = _mm512_set1_epi64(1);
-				int sm = compr_results1 | compr_results2;
+				
+				int sm = 0;
 
-				iters1 = _mm512_mask_add_epi64(iters1, compr_results1, iters1, one512);
-				iters2 = _mm512_mask_add_epi64(iters2, compr_results2, iters2, one512);
+				for (int i = 0; i < NCV_BATCH; i++) 
+					sm |= compr_results[i];
+
+				for (int i = 0; i < NCV_BATCH; i++)
+					iterses[i] = _mm512_mask_add_epi64(iterses[i],
+						compr_results[i], iterses[i], one512);
 
 #ifndef MBT_NO_EARLY_STOP
 				if (!sm) break;
@@ -93,8 +116,9 @@ void calcMandelbrotDoubleSet(uint32_t *pixels_ptr, int pitch, int height, int wi
 			}
 
 			int64_t iters_arr[STEP_ARR_LEN];
-			_mm512_storeu_si512(((__m512i*)iters_arr), iters2);
-			_mm512_storeu_si512(((__m512i*)iters_arr) + 1, iters1);
+			for (int i = 0, j = NCV_BATCH - 1; i < NCV_BATCH; i++, j--) {
+				_mm512_storeu_si512(((__m512i*)iters_arr) + i, iterses[j]);
+			}
 			// We should go in reverse because of little-endianness
 			int j = STEP_ARR_LEN - 1;
 

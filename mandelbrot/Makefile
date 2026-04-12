@@ -15,7 +15,7 @@ mandelbrot: mandelbrot_calc.h $(MANDELBROT_CALC_FILE) mandelbrot.c
 
 mandelbrot_bench: mandelbrot_calc.h $(MANDELBROT_CALC_FILE) mandelbrot_bench.c
 	mkdir -p ./build
-	gcc $(BENCH_CFLAGS) -DMBT_NO_EARLY_STOP -O3 -march=native -lm -ggdb3 $(MANDELBROT_CALC_FILE) mandelbrot_bench.c -o ./build/mandelbrot_bench
+	gcc $(BENCH_CFLAGS) -DMBT_NO_EARLY_STOP -DMBT_BENCHMARK -fopenmp -O3 -march=native -lm -ggdb3 $(MANDELBROT_CALC_FILE) mandelbrot_bench.c -o ./build/mandelbrot_bench
 
 clean:
 	rm -rf build
