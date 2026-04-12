@@ -51,7 +51,7 @@ void calcMandelbrotFloatSet(uint32_t *pixels_ptr, int pitch, int height, int wid
 						_mm512_set1_ps(MBT_STOP_RADIUS));
 
 				__m512i one512 = _mm512_set1_epi32(1);
-				volatile int sm = compr_results;
+				int sm = compr_results;
 
 				iters = _mm512_mask_add_epi32(iters, compr_results, iters, one512);
 
@@ -124,7 +124,7 @@ void calcMandelbrotDoubleSet(uint32_t *pixels_ptr, int pitch, int height, int wi
 						_mm512_set1_pd(MBT_STOP_RADIUS));
 
 				__m512i one512 = _mm512_set1_epi64(1);
-				volatile int sm = compr_results;
+				int sm = compr_results;
 
 				iters = _mm512_mask_add_epi64(iters, compr_results, iters, one512);
 

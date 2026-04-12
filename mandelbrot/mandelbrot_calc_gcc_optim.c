@@ -62,12 +62,12 @@ void calcMandelbrotFloatSet(uint32_t *pixels_ptr, int pitch, int height, int wid
 				for (int i = 0; i < STEP_ARR_LEN; i++) { incs[i] = (zx_dbs[i] + zy_dbs[i] <= MBT_STOP_RADIUS); }
 
 				for (int i = 0; i < STEP_ARR_LEN; i++) { iters[i] += incs[i]; }
-				int sm = 0;
-				for (int i = 0; i < STEP_ARR_LEN; i++) { sm += incs[i]; }
-
-#ifndef MBT_NO_EARLY_STOP
-				if (!sm) break;
-#endif
+// 				int sm = 0;
+// 				for (int i = 0; i < STEP_ARR_LEN; i++) { sm += incs[i]; }
+//
+// #ifndef MBT_NO_EARLY_STOP
+// 				if (!sm) break;
+// #endif
 			}
 
 			for (int i = 0; i < STEP_ARR_LEN; i++) {
@@ -132,12 +132,14 @@ void calcMandelbrotDoubleSet(uint32_t *pixels_ptr, int pitch, int height, int wi
 				for (int i = 0; i < STEP_ARR_LEN; i++) { incs[i] = (zx_dbs[i] + zy_dbs[i] <= MBT_STOP_RADIUS); }
 
 				for (int i = 0; i < STEP_ARR_LEN; i++) { iters[i] += incs[i]; }
-				int sm = 0;
-				for (int i = 0; i < STEP_ARR_LEN; i++) { sm += incs[i]; }
+				// int sm = 1;
 
-#ifndef MBT_NO_EARLY_STOP
-				if (!sm) break;
-#endif
+				// for (int i = 0; i < STEP_ARR_LEN; i++) { incs[i] = incs[i] == 0; }
+				// for (int i = 0; i < STEP_ARR_LEN; i++) { sm &= incs[i]; }
+
+// #ifndef MBT_NO_EARLY_STOP
+				// if (sm) break;
+// #endif
 			}
 
 			for (int i = 0; i < STEP_ARR_LEN; i++) {

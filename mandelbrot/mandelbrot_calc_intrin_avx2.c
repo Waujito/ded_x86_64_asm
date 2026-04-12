@@ -51,7 +51,7 @@ void calcMandelbrotFloatSet(uint32_t *pixels_ptr, int pitch, int height, int wid
 						_mm256_set1_ps(MBT_STOP_RADIUS), _CMP_LE_OQ);
 
 				__m256 one256 = _mm256_castsi256_ps(_mm256_set1_epi32(1));
-				volatile int sm = _mm256_movemask_ps(compr_results);
+				int sm = _mm256_movemask_ps(compr_results);
 				compr_results = _mm256_and_ps(compr_results, one256);
 				iters = _mm256_add_epi32(iters, _mm256_castps_si256(compr_results));
 
@@ -124,7 +124,7 @@ void calcMandelbrotDoubleSet(uint32_t *pixels_ptr, int pitch, int height, int wi
 						_mm256_set1_pd(MBT_STOP_RADIUS), _CMP_LE_OQ);
 
 				__m256d one256 = _mm256_castsi256_pd(_mm256_set1_epi64x(1));
-				volatile int sm = _mm256_movemask_pd(compr_results);
+				int sm = _mm256_movemask_pd(compr_results);
 				compr_results = _mm256_and_pd(compr_results, one256);
 				iters = _mm256_add_epi64(iters, _mm256_castpd_si256(compr_results));
 
