@@ -1,4 +1,4 @@
-MANDELBROT_CALC_FILE:=mandelbrot_calc_intrin_avx512.c
+MANDELBROT_CALC_FILE:=mandelbrot_calc_intrin_avx512_par.c
 
 build: mandelbrot mandelbrot_bench
 

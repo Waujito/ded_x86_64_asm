@@ -39,6 +39,11 @@ run_double_intrin_avx512_tests() {
 	run_tests | test_format_name "double_intrin_avx512"
 }
 
+run_double_intrin_avx512_par_tests() {
+	make MANDELBROT_CALC_FILE="mandelbrot_calc_intrin_avx512_par.c" 1>&2
+	run_tests | test_format_name "double_intrin_avx512_par"
+}
+
 run_float_intrin_avx512_tests() {
 	make MANDELBROT_CALC_FILE="mandelbrot_calc_intrin_avx512.c" BENCH_CFLAGS="-DMBT_MANDELBROT_FLOATS" 1>&2
 	run_tests| test_format_name "float_intrin_avx512"
@@ -85,3 +90,5 @@ run_float_simple_tests
 
 run_double_gcc_optim_tests
 run_float_gcc_optim_tests
+
+run_double_intrin_avx512_par_tests
