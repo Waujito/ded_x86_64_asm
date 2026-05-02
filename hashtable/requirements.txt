@@ -1,0 +1,5 @@
+polars
+pandas
+matplotlib
+seaborn
+jupyterlab
