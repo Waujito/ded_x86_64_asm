@@ -21,7 +21,7 @@ ifndef TESTER_HASHING_ALGO
 	TESTER_HASHING_ALGO := src/ht_chains.c
 endif
 
-TESTER_SRC := src/tester_main.c $(TESTER_HASHING_ALGO) crc32.c 
+TESTER_SRC := src/tester_main.c $(TESTER_HASHING_ALGO) src/list.c crc32.c 
 TESTER_ASM := src/my_strlen.S
 TESTER_OBJ := $(TESTER_SRC:%.c=$(BUILD_DIR)/%.o)
 TESTER_APP := $(BUILD_DIR)/tester

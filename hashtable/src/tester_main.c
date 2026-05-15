@@ -103,7 +103,6 @@ struct ht_operation *read_operation_arr(
 
 #define FILENAME_BUFLEN (128)
 enum tsr_status test_one(hashtable_fn ht_fn, size_t len, const char *in_filename, double *time) {
-	assert (test_src);
 	assert (time);
 
 	struct ht_operation *operations = NULL;

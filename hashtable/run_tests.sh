@@ -31,39 +31,54 @@ get_strat_flag() {
 	return 0
 }
 
-K_WARMUP=1
-K_RUNS=7
+run_tests() {
+	K_WARMUP=1
+	K_RUNS=7
+	OPTIM_STRATS=(
+		""
+		"crc32"
+		"asm_strcmp"
+		"crc32 asm_strcmp"
+		"strlen"
+		"asm_strcmp strlen"
+		"crc32 strlen"
+		"crc32 asm_strcmp strlen"
+	)
 
-OPTIM_STRATS=(
-	""
-	"crc32"
-	"asm_strcmp"
-	"crc32 asm_strcmp"
-	"strlen"
-	"asm_strcmp strlen"
-	"crc32 strlen"
-	"crc32 asm_strcmp strlen"
-)
+	for strat in "${OPTIM_STRATS[@]}"; do
+		read -r -a strat_args <<< "$strat"
+		STRAT_FLAG=$(get_strat_flag "${strat_args[@]}")
 
-for strat in "${OPTIM_STRATS[@]}"; do
-	read -r -a strat_args <<< "$strat"
-	STRAT_FLAG=$(get_strat_flag "${strat_args[@]}")
+		make clean >/dev/null
+		make FLAGS="$STRAT_FLAG" >/dev/null
 
-	make clean >/dev/null
-	make FLAGS="$STRAT_FLAG" >/dev/null
+		echo "Test with strat \"$strat\""
+		
 
-	echo "Test with strat \"$strat\""
-	
+		for i in $(seq "$K_WARMUP"); do
+			echo "Warmup $i/$K_WARMUP: $(./build/tester) ms"
+		done
 
-	for i in $(seq "$K_WARMUP"); do
-		echo "Warmup $i/$K_WARMUP: $(./build/tester) ms"
+		for i in $(seq "$K_RUNS"); do
+			STRAT_TIME=$(./build/tester)
+			echo "\"$strat\",$i,$STRAT_TIME" >> "$REPORT_FILE"
+			echo "Run $i/$K_RUNS: $STRAT_TIME ms"
+		done
 	done
 
-	for i in $(seq "$K_RUNS"); do
-		STRAT_TIME=$(./build/tester)
-		echo "\"$strat\",$i,$STRAT_TIME" >> "$REPORT_FILE"
-		echo "Run $i/$K_RUNS: $STRAT_TIME ms"
-	done
-done
+	echo "Done"
+}
 
-echo "Done"
+build_strat() {
+	STRAT_FLAG=$(get_strat_flag "$@")
+	make clean
+	make FLAGS="$STRAT_FLAG"
+}
+
+if [[ "$@" != "" ]]; then
+	echo "Building strategy $@"
+	build_strat "$@"
+else
+	echo "Running all tests"
+	run_tests
+fi
